@@ -21,7 +21,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      # aquí puedes agregar tests con pytest si quieres
 
       - name: Create deploy ZIP
         run: |
