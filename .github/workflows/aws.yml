@@ -45,8 +45,6 @@ jobs:
           name: deploy-zip
           path: .
 
-      # Autenticación con AWS (puedes seguir con secrets de IAM User;
-      # idealmente migra a OIDC + role asumiendo con esta misma acción)
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -54,31 +52,39 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-2
 
-      - name: Upload to S3 (existing EB bucket) & deploy via AWS CLI
+      - name: Upload & deploy via AWS CLI (idempotente)
         env:
           APP_NAME: ${{ secrets.EB_APP_NAME }}
           ENV_NAME: ${{ secrets.EB_ENV_NAME }}
           REGION: us-east-2
           BUCKET: elasticbeanstalk-us-east-2-257247531621
-          VERSION: v-${{ github.run_number }}-${{ github.sha }}
+          # Label único (id + intento + sha corto)
+          VERSION: v-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           FILE: deploy.zip
         run: |
           set -euo pipefail
-          echo "Caller identity:"
-          aws sts get-caller-identity
 
-          echo "Bucket location:"
-          aws s3api get-bucket-location --bucket "$BUCKET"
+          echo "Caller identity:" && aws sts get-caller-identity
+          aws s3api get-bucket-location --bucket "$BUCKET" >/dev/null
 
-          echo "Uploading $FILE to s3://$BUCKET/$VERSION.zip"
-          aws s3 cp "$FILE" "s3://$BUCKET/$VERSION.zip"
+          KEY="${VERSION}.zip"
+          echo "Uploading $FILE to s3://$BUCKET/$KEY"
+          aws s3 cp "$FILE" "s3://$BUCKET/$KEY"
 
-          echo "Creating EB Application Version: $VERSION"
-          aws elasticbeanstalk create-application-version \
-            --application-name "$APP_NAME" \
-            --version-label "$VERSION" \
-            --source-bundle S3Bucket="$BUCKET",S3Key="$VERSION.zip" \
-            --region "$REGION"
+          echo "Ensuring EB Application Version: $VERSION"
+          if aws elasticbeanstalk describe-application-versions \
+               --application-name "$APP_NAME" \
+               --version-labels "$VERSION" \
+               --region "$REGION" \
+               --query 'ApplicationVersions | length(@)' | grep -q '^1$'; then
+            echo "Version already exists, skipping create."
+          else
+            aws elasticbeanstalk create-application-version \
+              --application-name "$APP_NAME" \
+              --version-label "$VERSION" \
+              --source-bundle S3Bucket="$BUCKET",S3Key="$KEY" \
+              --region "$REGION"
+          fi
 
           echo "Updating environment: $ENV_NAME -> $VERSION"
           aws elasticbeanstalk update-environment \
