@@ -34,7 +34,6 @@ jobs:
 
   deploy:
     needs: build-and-test
-    # Solo desplegar en push directo a main
     if: github.event_name == 'push' && github.ref_name == 'main'
     runs-on: ubuntu-latest
     steps:
@@ -46,21 +45,45 @@ jobs:
           name: deploy-zip
           path: .
 
-      - name: Sanity check
-        run: |
-          echo "event=${{ github.event_name }} ref=${{ github.ref }} ref_name=${{ github.ref_name }}"
-          ls -lah
-
-      - name: Deploy to Elastic Beanstalk
-        uses: einaregilsson/beanstalk-deploy@v22
+      # Autenticación con AWS (puedes seguir con secrets de IAM User;
+      # idealmente migra a OIDC + role asumiendo con esta misma acción)
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          application_name: ${{ secrets.EB_APP_NAME }}
-          environment_name: ${{ secrets.EB_ENV_NAME }}
-          # Región fija según tu entorno
-          region: us-east-2
-          version_label: v-${{ github.run_number }}-${{ github.sha }}
-          deployment_package: deploy.zip
-          # Evita que el action intente crear bucket y usa el existente
-          existing_bucket_name: elasticbeanstalk-us-east-2-257247531621
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
+
+      - name: Upload to S3 (existing EB bucket) & deploy via AWS CLI
+        env:
+          APP_NAME: ${{ secrets.EB_APP_NAME }}
+          ENV_NAME: ${{ secrets.EB_ENV_NAME }}
+          REGION: us-east-2
+          BUCKET: elasticbeanstalk-us-east-2-257247531621
+          VERSION: v-${{ github.run_number }}-${{ github.sha }}
+          FILE: deploy.zip
+        run: |
+          set -euo pipefail
+          echo "Caller identity:"
+          aws sts get-caller-identity
+
+          echo "Bucket location:"
+          aws s3api get-bucket-location --bucket "$BUCKET"
+
+          echo "Uploading $FILE to s3://$BUCKET/$VERSION.zip"
+          aws s3 cp "$FILE" "s3://$BUCKET/$VERSION.zip"
+
+          echo "Creating EB Application Version: $VERSION"
+          aws elasticbeanstalk create-application-version \
+            --application-name "$APP_NAME" \
+            --version-label "$VERSION" \
+            --source-bundle S3Bucket="$BUCKET",S3Key="$VERSION.zip" \
+            --region "$REGION"
+
+          echo "Updating environment: $ENV_NAME -> $VERSION"
+          aws elasticbeanstalk update-environment \
+            --environment-name "$ENV_NAME" \
+            --version-label "$VERSION" \
+            --region "$REGION"
+
+          echo "Done."
