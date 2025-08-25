@@ -2,7 +2,7 @@ name: CI/CD to Elastic Beanstalk
 
 on:
   push:
-    branches: [ master ]   # cámbialo a "main" si tu rama se llama así
+    branches: [ master ]
   pull_request:
     branches: [ master ]
 
