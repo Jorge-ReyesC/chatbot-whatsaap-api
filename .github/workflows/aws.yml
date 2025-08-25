@@ -2,9 +2,9 @@ name: CI/CD to Elastic Beanstalk - TEST PYTHON
 
 on:
   push:
-    branches: [ master ]
+    branches: [ main ]
   pull_request:
-    branches: [ master ]
+    branches: [ main ]
 
 jobs:
   build-and-test:
@@ -34,7 +34,7 @@ jobs:
 
   deploy:
     needs: build-and-test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
